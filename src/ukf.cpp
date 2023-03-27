@@ -47,10 +47,10 @@ UKF::UKF() {
   time_us_ = 0.0;
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 3.;
+  std_a_ = 3.0;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
-  std_yawdd_ = 0.5;
+  std_yawdd_ = 0.7;
 
   /**
    * DO NOT MODIFY measurement noise values below.
@@ -106,6 +106,11 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * measurements.
    */
   if (!is_initialized_) {
+    P_ << 1.0, 0.0, 0.0, 0.0, 0.0,
+          0.0, 1.0, 0.0, 0.0, 0.0,
+          0.0, 0.0, 10.0, 0.0, 0.0,
+          0.0, 0.0, 0.0, 10., 0.0,
+          0.0, 0.0, 0.0, 0.0, 1.0;
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
       double rho = meas_package.raw_measurements_[0];
       double phi = meas_package.raw_measurements_[1];
@@ -117,10 +122,10 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       double vy = rho_dot * std::sin(phi);
       double v = std::sqrt(vx * vx + vy * vy);
 
-      x_ << px, py, v, 0, 0;
+      x_ << px, py, v, 0., 0.;
 
     } else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
-      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0, 0, 0;
+      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0., 0., 0.;
     }
     time_us_ = meas_package.timestamp_;
     is_initialized_ = true;
@@ -182,7 +187,7 @@ void UKF::Prediction(double delta_t) {
     // Predicted state values
     double px_predicted, py_predicted;
     // avoid division by zero
-    if (fabs(psi_dot) > 0.001) {
+    if (fabs(psi_dot) > 0.00001) {
       px_predicted = px + v / psi_dot * (std::sin(psi + psi_dot * delta_t) - std::sin(psi));
       py_predicted = py + v / psi_dot * (std::cos(psi) - std::cos(psi + psi_dot * delta_t));
     } else {
@@ -198,7 +203,6 @@ void UKF::Prediction(double delta_t) {
     px_predicted += 0.5 * nu_a * delta_t * delta_t * std::cos(psi);
     py_predicted += 0.5 * nu_a * delta_t * delta_t * std::sin(psi);
     v_predicted += nu_a * delta_t;
-
     psi_predicted += 0.5 * nu_psi_dot_dot * delta_t * delta_t;
     psi_dot_predicted += nu_psi_dot_dot * delta_t;
 
@@ -358,9 +362,11 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   for (int i = 0; i < n_sig_; ++i) {
     // residual
     VectorXd z_diff = Zsig.col(i) - z_pred;
+    normalize_angle(z_diff(RadarStates::Phi));
 
     // state difference
     VectorXd x_diff = Xsig_pred_.col(i) - x_;
+    normalize_angle(x_diff(States::Psi));
 
     Tc = Tc + weights_(i) * x_diff * z_diff.transpose();
   }
