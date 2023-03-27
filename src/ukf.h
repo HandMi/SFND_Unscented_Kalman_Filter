@@ -122,10 +122,16 @@ public:
   int n_aug_;
   int n_sig_;
   int n_lid_;
-  int n_rad;
+  int n_rad_;
 
   // Sigma point spreading parameter
   double lambda_;
+
+  // used for NIS tracking
+  unsigned long long lidar_count_{0};
+  unsigned long long lidar_nis_count_{0};
+  unsigned long long radar_count_{0};
+  unsigned long long radar_nis_count_{0};
 };
 
 #endif // UKF_H

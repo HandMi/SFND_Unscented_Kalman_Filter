@@ -9,10 +9,12 @@ using Eigen::VectorXd;
 
 namespace {
 inline void normalize_angle(double &angle) {
-  while (angle > M_PI){
-    angle -= 2. * M_PI;}
-  while (angle < -M_PI){
-    angle += 2. * M_PI;}
+  while (angle > M_PI) {
+    angle -= 2. * M_PI;
+  }
+  while (angle < -M_PI) {
+    angle += 2. * M_PI;
+  }
 }
 } // namespace
 /**
@@ -26,14 +28,14 @@ UKF::UKF() {
   use_laser_ = true;
 
   // if this is false, radar measurements will be ignored (except during init)
-  use_radar_ = false;
+  use_radar_ = true;
 
   // State dimensions
   n_x_ = States::NumberOfStates;
   n_aug_ = AugmentedStates::NumberOfStates;
   n_sig_ = 2 * AugmentedStates::NumberOfStates + 1;
   n_lid_ = LidarStates::NumberOfStates;
-  n_rad = RadarStates::NumberOfStates;
+  n_rad_ = RadarStates::NumberOfStates;
 
   // initial state vector
   x_ = VectorXd(n_x_);
@@ -45,7 +47,7 @@ UKF::UKF() {
   time_us_ = 0.0;
 
   // Process noise standard deviation longitudinal acceleration in m/s^2
-  std_a_ = 1.0;
+  std_a_ = 3.;
 
   // Process noise standard deviation yaw acceleration in rad/s^2
   std_yawdd_ = 0.5;
@@ -75,7 +77,7 @@ UKF::UKF() {
    */
 
   // Initialize measurement noise covariance matrices
-  R_radar_ = MatrixXd(n_rad, n_rad);
+  R_radar_ = MatrixXd(n_rad_, n_rad_);
   R_radar_ << std_radr_ * std_radr_, 0, 0, 0, std_radphi_ * std_radphi_, 0, 0, 0, std_radrd_ * std_radrd_;
 
   R_lidar_ = MatrixXd(n_lid_, n_lid_);
@@ -83,6 +85,7 @@ UKF::UKF() {
 
   // Predicted sigma points
   Xsig_pred_ = MatrixXd(n_x_, n_sig_);
+  Xsig_pred_.fill(0);
   // Sigma point spreading parameter
   lambda_ = 3. - n_aug_;
   weights_ = VectorXd(n_sig_);
@@ -122,8 +125,8 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
     time_us_ = meas_package.timestamp_;
     is_initialized_ = true;
   } else {
-    double dt = (meas_package.timestamp_ - time_us_) / 1000000.0;
-    double time_us_ = meas_package.timestamp_;
+    double dt = static_cast<double>(meas_package.timestamp_ - time_us_) / 1000000.0;
+    time_us_ = meas_package.timestamp_;
     Prediction(dt);
 
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR && use_radar_) {
@@ -284,13 +287,16 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   // residual
   VectorXd z_diff = z - z_pred;
+  
+  x_ = x_ + K * z_diff;
+  P_ = P_ - K * S * K.transpose();
 
   double NIS = z_diff.transpose() * S.inverse() * z_diff;
-  if(NIS>100.){is_initialized_=false;}
-  else{
-  // update state mean and covariance matrix
-  x_ = x_ + K * z_diff;
-  P_ = P_ - K * S * K.transpose();}
+  ++lidar_count_;
+  if(NIS>5.991){
+    ++lidar_nis_count_;
+  std::cout << "Lidar exceeds 5% NIS threshold at rate " << static_cast<double>(lidar_nis_count_)/static_cast<double>(lidar_count_) << "\n";
+  }
 }
 
 void UKF::UpdateRadar(MeasurementPackage meas_package) {
@@ -300,4 +306,78 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
    * covariance, P_.
    * You can also calculate the radar NIS, if desired.
    */
+  // incoming radar measurement
+  VectorXd z = meas_package.raw_measurements_;
+
+  // create matrix for sigma points in measurement space
+  MatrixXd Zsig = MatrixXd(n_rad_, n_sig_);
+
+  // mean predicted measurement
+  VectorXd z_pred = VectorXd(n_rad_);
+
+  // measurement covariance matrix S
+  MatrixXd S = MatrixXd(n_rad_, n_rad_);
+
+  // transform sigma points into measurement space
+  for (int i = 0; i < n_sig_; ++i) {
+    // measurement model
+    double px = Xsig_pred_(States::Px,i);
+    double py = Xsig_pred_(States::Py,i);
+    double v  = Xsig_pred_(States::V,i);
+    double psi = Xsig_pred_(States::Psi,i);
+
+    double v1 = cos(psi)*v;
+    double v2 = sin(psi)*v;
+
+    // measurement model
+    Zsig(RadarStates::R,i) = sqrt(px*px + py*py);
+    Zsig(RadarStates::Phi,i) = atan2(py,px);
+    Zsig(RadarStates::RDot,i) = (px*v1 + py*v2) / sqrt(px*px + py*py);
+  }
+
+  // mean predicted measurement
+  z_pred = Zsig * weights_;
+
+  // innovation covariance matrix S
+  S.fill(0.0);
+  for (int i = 0; i < n_sig_; ++i) {
+    // residual
+    VectorXd z_diff = Zsig.col(i) - z_pred;
+    normalize_angle(z_diff(RadarStates::Phi));
+    S = S + weights_(i) * z_diff * z_diff.transpose();
+  }
+
+  // add measurement noise covariance matrix
+  S = S + R_radar_;
+
+  // create matrix for cross correlation Tc
+  MatrixXd Tc = MatrixXd(n_x_, n_rad_);
+
+  // calculate cross correlation matrix
+  Tc.fill(0.0);
+  for (int i = 0; i < n_sig_; ++i) {
+    // residual
+    VectorXd z_diff = Zsig.col(i) - z_pred;
+
+    // state difference
+    VectorXd x_diff = Xsig_pred_.col(i) - x_;
+
+    Tc = Tc + weights_(i) * x_diff * z_diff.transpose();
+  }
+
+  // Kalman gain K;
+  MatrixXd K = Tc * S.inverse();
+
+  // residual
+  VectorXd z_diff = z - z_pred;
+  
+  x_ = x_ + K * z_diff;
+  P_ = P_ - K * S * K.transpose();
+
+  double NIS = z_diff.transpose() * S.inverse() * z_diff;
+  ++radar_count_;
+  if(NIS>7.815){
+    ++radar_nis_count_;
+  std::cout << "Radar exceeds 5% NIS threshold at rate " << static_cast<double>(radar_nis_count_)/static_cast<double>(radar_count_) << "\n";
+  }
 }
