@@ -41,7 +41,9 @@ UKF::UKF() {
   x_ = VectorXd(n_x_);
 
   // initial covariance matrix
-  P_ = MatrixXd::Identity(n_x_, n_x_);
+  P_ = MatrixXd(n_x_, n_x_);
+
+  P_ << 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10., 0.0, 0.0, 0.0, 0.0, 0.0, 1.0;
 
   // time when the state is true, in us
   time_us_ = 0.0;
@@ -106,15 +108,10 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
    * measurements.
    */
   if (!is_initialized_) {
-    P_ << 1.0, 0.0, 0.0, 0.0, 0.0,
-          0.0, 1.0, 0.0, 0.0, 0.0,
-          0.0, 0.0, 10.0, 0.0, 0.0,
-          0.0, 0.0, 0.0, 10., 0.0,
-          0.0, 0.0, 0.0, 0.0, 1.0;
     if (meas_package.sensor_type_ == MeasurementPackage::RADAR) {
-      double rho = meas_package.raw_measurements_[0];
-      double phi = meas_package.raw_measurements_[1];
-      double rho_dot = meas_package.raw_measurements_[2];
+      double rho = meas_package.raw_measurements_[RadarStates::R];
+      double phi = meas_package.raw_measurements_[RadarStates::Phi];
+      double rho_dot = meas_package.raw_measurements_[RadarStates::RDot];
 
       double px = rho * std::cos(phi);
       double py = rho * std::sin(phi);
@@ -125,7 +122,7 @@ void UKF::ProcessMeasurement(MeasurementPackage meas_package) {
       x_ << px, py, v, 0., 0.;
 
     } else if (meas_package.sensor_type_ == MeasurementPackage::LASER) {
-      x_ << meas_package.raw_measurements_[0], meas_package.raw_measurements_[1], 0., 0., 0.;
+      x_ << meas_package.raw_measurements_[LidarStates::Px], meas_package.raw_measurements_[LidarStates::Py], 0., 0., 0.;
     }
     time_us_ = meas_package.timestamp_;
     is_initialized_ = true;
@@ -291,15 +288,15 @@ void UKF::UpdateLidar(MeasurementPackage meas_package) {
 
   // residual
   VectorXd z_diff = z - z_pred;
-  
+
   x_ = x_ + K * z_diff;
   P_ = P_ - K * S * K.transpose();
 
   double NIS = z_diff.transpose() * S.inverse() * z_diff;
   ++lidar_count_;
-  if(NIS>5.991){
+  if (NIS > 5.991) {
     ++lidar_nis_count_;
-  std::cout << "Lidar exceeds 5% NIS threshold at rate " << static_cast<double>(lidar_nis_count_)/static_cast<double>(lidar_count_) << "\n";
+    std::cout << "Lidar exceeds 5% NIS threshold at rate " << static_cast<double>(lidar_nis_count_) / static_cast<double>(lidar_count_) << "\n";
   }
 }
 
@@ -325,18 +322,18 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
   // transform sigma points into measurement space
   for (int i = 0; i < n_sig_; ++i) {
     // measurement model
-    double px = Xsig_pred_(States::Px,i);
-    double py = Xsig_pred_(States::Py,i);
-    double v  = Xsig_pred_(States::V,i);
-    double psi = Xsig_pred_(States::Psi,i);
+    double px = Xsig_pred_(States::Px, i);
+    double py = Xsig_pred_(States::Py, i);
+    double v = Xsig_pred_(States::V, i);
+    double psi = Xsig_pred_(States::Psi, i);
 
-    double v1 = cos(psi)*v;
-    double v2 = sin(psi)*v;
+    double v1 = cos(psi) * v;
+    double v2 = sin(psi) * v;
 
     // measurement model
-    Zsig(RadarStates::R,i) = sqrt(px*px + py*py);
-    Zsig(RadarStates::Phi,i) = atan2(py,px);
-    Zsig(RadarStates::RDot,i) = (px*v1 + py*v2) / sqrt(px*px + py*py);
+    Zsig(RadarStates::R, i) = sqrt(px * px + py * py);
+    Zsig(RadarStates::Phi, i) = atan2(py, px);
+    Zsig(RadarStates::RDot, i) = (px * v1 + py * v2) / sqrt(px * px + py * py);
   }
 
   // mean predicted measurement
@@ -376,14 +373,14 @@ void UKF::UpdateRadar(MeasurementPackage meas_package) {
 
   // residual
   VectorXd z_diff = z - z_pred;
-  
+
   x_ = x_ + K * z_diff;
   P_ = P_ - K * S * K.transpose();
 
   double NIS = z_diff.transpose() * S.inverse() * z_diff;
   ++radar_count_;
-  if(NIS>7.815){
+  if (NIS > 7.815) {
     ++radar_nis_count_;
-  std::cout << "Radar exceeds 5% NIS threshold at rate " << static_cast<double>(radar_nis_count_)/static_cast<double>(radar_count_) << "\n";
+    std::cout << "Radar exceeds 5% NIS threshold at rate " << static_cast<double>(radar_nis_count_) / static_cast<double>(radar_count_) << "\n";
   }
 }
