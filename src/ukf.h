@@ -4,8 +4,33 @@
 #include "Eigen/Dense"
 #include "measurement_package.h"
 
+namespace States {
+enum States : int  { Px, Py, V, Psi, PsiDot, NumberOfStates };
+}
+
+namespace AugmentedStates {
+enum AugmentedStates : int  {
+  Px,
+  Py,
+  V,
+  Psi,
+  PsiDot,
+  NuA,
+  NuPsiDotDot,
+  NumberOfStates
+};
+}
+
+namespace RadarStates {
+enum RadarStates : int  { R, Phi, RDot, NumberOfStates };
+}
+
+namespace LidarStates{
+enum LidarStates : int  { Px, Py, NumberOfStates };
+}
+
 class UKF {
- public:
+public:
   /**
    * Constructor
    */
@@ -40,7 +65,6 @@ class UKF {
    * @param meas_package The measurement at k+1
    */
   void UpdateRadar(MeasurementPackage meas_package);
-
 
   // initially set to false, set to true in first call of ProcessMeasurement
   bool is_initialized_;
@@ -82,19 +106,26 @@ class UKF {
   double std_radphi_;
 
   // Radar measurement noise standard deviation radius change in m/s
-  double std_radrd_ ;
+  double std_radrd_;
+
+  // Radar measurement noise covariance matrix
+  Eigen::MatrixXd R_radar_;
+
+  // Lidar measurement noise covariance matrix
+  Eigen::MatrixXd R_lidar_;
 
   // Weights of sigma points
   Eigen::VectorXd weights_;
 
-  // State dimension
+  // State dimensions
   int n_x_;
-
-  // Augmented state dimension
   int n_aug_;
+  int n_sig_;
+  int n_lid_;
+  int n_rad;
 
   // Sigma point spreading parameter
   double lambda_;
 };
 
-#endif  // UKF_H
+#endif // UKF_H
